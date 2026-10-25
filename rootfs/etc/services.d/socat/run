@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+HOST="$(jq -r '.host' /data/options.json)"
+PORT="$(jq -r '.port' /data/options.json)"
+LINK="$(jq -r '.link' /data/options.json)"
+
+echo "[socat-lg] Connecting to ${HOST}:${PORT}"
+echo "[socat-lg] Linking PTY to ${LINK}"
+
+# CRLF bescherming als iemand per ongeluk Windows-CRLF plakt
+# (werkt ook als er geen CRLF is)
+sed -i 's/\r$//' "$0" 2>/dev/null || true
+
+exec socat -d -d "tcp:${HOST}:${PORT}" "pty,raw,echo=0,link=${LINK}"

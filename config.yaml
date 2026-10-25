@@ -1,0 +1,26 @@
+name: "Socat LG Therma V bridge"
+slug: "socat_lg_bridge"
+version: "1.0.0"
+description: "Bridge SE5201 TCP serial tunnel to a local PTY symlink in /config/ttyLG"
+startup: services
+boot: auto
+init: false
+arch:
+  - aarch64
+  - armv7
+  - armhf
+  - amd64
+  - i386
+
+map:
+  - config:rw
+
+options:
+  host: "192.168.1.6"
+  port: 4660
+  link: "/config/ttyLG"
+
+schema:
+  host: str
+  port: int
+  link: str
