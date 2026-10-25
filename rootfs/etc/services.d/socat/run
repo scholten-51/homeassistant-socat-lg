@@ -1,15 +1,67 @@
 #!/bin/sh
-set -e
+# Home Assistant add-on service: ATOP RAW TCP <-> PTY
+set -eu
 
-HOST="$(jq -r '.host' /data/options.json)"
-PORT="$(jq -r '.port' /data/options.json)"
-LINK="$(jq -r '.link' /data/options.json)"
+log() { printf '%s [socat-lg] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+fail() { log "ERROR: $*"; exit 1; }
 
-echo "[socat-lg] Connecting to ${HOST}:${PORT}"
-echo "[socat-lg] Linking PTY to ${LINK}"
+OPTIONS=/data/options.json
+[ -r "$OPTIONS" ] || fail "Missing $OPTIONS"
+HOST=$(jq -er '.host | select(type == "string")' "$OPTIONS") || fail "Invalid host option"
+PORT=$(jq -er '.port | select(type == "number" and . == floor)' "$OPTIONS") || fail "Invalid port option"
+LINK=$(jq -er '.link | select(type == "string")' "$OPTIONS") || fail "Invalid link option"
 
-# CRLF bescherming als iemand per ongeluk Windows-CRLF plakt
-# (werkt ook als er geen CRLF is)
-sed -i 's/\r$//' "$0" 2>/dev/null || true
+case "$HOST" in
+  ''|*[!a-zA-Z0-9.:-]*) fail "Host must be an IPv4/IPv6 address or DNS name" ;;
+esac
+case "$PORT" in
+  ''|*[!0-9]*) fail "Port must be numeric" ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail "Port must be 1..65535"
+case "$LINK" in
+  /config/*) ;;
+  *) fail "Link must be an absolute path under /config/" ;;
+esac
+case "$LINK" in
+  *'/../'*|*'/./'*|*/..|*/.) fail "Link must not contain relative path segments" ;;
+esac
+[ "$LINK" != /config/ ] || fail "Link must name a file under /config"
+[ -d "$(dirname "$LINK")" ] || fail "Link parent directory does not exist"
+if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then
+  fail "$LINK exists and is not a symbolic link; refusing to overwrite it"
+fi
 
-exec socat -d -d "tcp:${HOST}:${PORT}" "pty,raw,echo=0,link=${LINK}"
+child=''
+stopping=0
+stop() {
+  stopping=1
+  log "Stopping bridge"
+  if [ -n "$child" ]; then
+    kill "$child" 2>/dev/null || true
+  fi
+}
+trap stop TERM INT
+
+log "Starting bridge v1.1.0: ${HOST}:${PORT} -> ${LINK} (RAW TCP)"
+while [ "$stopping" -eq 0 ]; do
+  # Only remove a stale symlink; never delete an actual serial device or file.
+  if [ -L "$LINK" ] && [ ! -e "$LINK" ]; then
+    rm -f "$LINK"
+  fi
+  log "Opening TCP connection"
+  # socat exits on disconnect; this supervisor loop reconnects.
+  # TCP keepalive detects some half-open connections; it does not test Modbus health.
+  socat -d -d \
+    "TCP:${HOST}:${PORT},connect-timeout=10,keepalive" \
+    "PTY,raw,echo=0,link=${LINK}" &
+  child=$!
+  wait "$child" || true
+  child=''
+  [ "$stopping" -eq 1 ] && break
+  log "Connection ended; reconnecting in 5 seconds"
+  sleep 5 &
+  child=$!
+  wait "$child" || true
+  child=''
+done
+log "Bridge stopped"
