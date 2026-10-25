@@ -1,0 +1,21 @@
+name: "Socat LG Therma V bridge"
+slug: "socat_lg_bridge"
+version: "1.1.0"
+description: "Reliable RAW TCP to local PTY bridge for LG Therma V via ATOP SE5201"
+startup: services
+boot: auto
+init: false
+arch:
+  - aarch64
+  - armv7
+  - amd64
+map:
+  - config:rw
+options:
+  host: "192.168.1.6"
+  port: 4660
+  link: "/config/ttyLG"
+schema:
+  host: str
+  port: int
+  link: str
